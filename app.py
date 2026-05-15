@@ -1,9 +1,14 @@
 import pandas as pd
 import plotly.express as px
+import streamlit as st
 
 # =========================================================
 # Page setup
 # =========================================================
+st.set_page_config(
+    page_title="Uber Ride Analytics Dashboard",
+    layout="wide"
+)
 
 DATA_PATH = "ncr_ride_bookings.csv"
 
@@ -26,21 +31,51 @@ rides["Is Not Completed"] = ~rides["Is Completed"]
 # =========================================================
 # Header
 # =========================================================
+st.title("Uber Ride Analytics Dashboard")
+st.caption("A Streamlit dashboard for monitoring bookings, revenue, cancellations, service quality and ratings.")
 
 
 # =========================================================
 # Sidebar filters
 # =========================================================
+st.sidebar.header("Dashboard controls")
+st.sidebar.caption("Global filters applied across all tabs.")
 
 original_rides = rides.copy()
+
+selected_date_range = st.sidebar.date_input(
+    "Date range",
+    value=(original_rides["Date"].min().date(), original_rides["Date"].max().date()),
+    min_value=original_rides["Date"].min().date(),
+    max_value=original_rides["Date"].max().date(),
+)
+
+vehicle_options = ["All"] + sorted(original_rides["Vehicle Type"].unique())
+selected_vehicle = st.sidebar.selectbox("Vehicle type", vehicle_options)
+
+if len(selected_date_range) == 2:
+    start_date, end_date = selected_date_range
+    rides = rides[
+        (rides["Date"] >= pd.to_datetime(start_date))
+        & (rides["Date"] <= pd.to_datetime(end_date))
+    ]
+
+if selected_vehicle != "All":
+    rides = rides[rides["Vehicle Type"] == selected_vehicle]
 
 completed_rides = rides[rides["Is Completed"]]
 not_completed_rides = rides[rides["Is Not Completed"]]
 
+if completed_rides.empty:
+    st.warning("Selected filters contain no completed rides. Some charts may be unavailable.")
+    
+
 # =========================================================
 # Tabs
 # =========================================================
-
+tab_full, tab_cancellations, tab_ratings = st.tabs(
+    ["Overview", "Cancellations & issues", "Ratings & time"]
+)
 
 
 # =========================================================
@@ -75,51 +110,52 @@ revenue_by_payment = (
 )
 #endregion
 
-print("OVERVIEW")
+with tab_full:
+    st.subheader("Overview")
 
-# -------------
-# KPI 
-# -------------
-print("Bookings", total_bookings)
-print("Success rate", str(success_rate) + "%")
-print("Cancellation rate", str(cancellation_rate) + "%")
-print("Revenue", "₹" + str(total_revenue) + "tys")
-print("Avg distance", str(round(avg_distance,2)) + "km")
+    col1, col2, col3, col4, col5 = st.columns(5)
+    col1.metric("Bookings", total_bookings)
+    col2.metric("Success rate", str(success_rate) + "%")
+    col3.metric("Cancellation rate", str(cancellation_rate) + "%")
+    col4.metric("Revenue", "₹" + str(total_revenue) + "tys")
+    col5.metric("Avg distance", str(round(avg_distance,2)) + "km")
 
-# -------------
-# Wykres liniowy liczby bookingów
-# -------------
-fig = px.line(daily_bookings, x="Date", y="Bookings")
-#fig.show()
+    st.divider()
 
-# -------------
-# Wykres kołowy statusów 
-# -------------
-fig = px.pie(status_overview, names="Status", values="Bookings", hole=0.35)
-#fig.show()
+    col_left, col_right = st.columns(2)
 
-# -------------
-# Wykres słupkowy typu pojazdu
-# -------------
-fig = px.bar(revenue_by_vehicle, x="Vehicle Type", y="Booking Value")
-#fig.show()
+    with col_left:
+        st.markdown("#### Bookings over time")
+        fig = px.line(daily_bookings, x="Date", y="Bookings")
+        st.plotly_chart(fig, use_container_width=True)
 
-# -------------
-# Wykres słupkowy metody płatności
-# -------------
-fig = px.bar(revenue_by_payment, x="Payment Method", y="Booking Value")
-#fig.show()
+    with col_right:
+        st.markdown("#### Booking status overview")
+        fig = px.pie(status_overview, names="Status", values="Bookings", hole=0.35)
+        st.plotly_chart(fig, use_container_width=True)
 
-# -------------
-# Wykres rozrzutu distans vs wartość
-# -------------
-fig = px.scatter(
-    completed_rides,
-    x="Ride Distance",
-    y="Booking Value",
-    hover_data=["Payment Method", "Pickup Location", "Drop Location"],
-)
-#fig.show()
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.markdown("#### Revenue by vehicle type")
+        fig = px.bar(revenue_by_vehicle, x="Vehicle Type", y="Booking Value")
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col_right:
+        st.markdown("#### Revenue by payment method")
+        fig = px.bar(revenue_by_payment, x="Payment Method", y="Booking Value")
+        st.plotly_chart(fig, use_container_width=True)
+
+    
+    st.markdown("#### Ride distance vs booking value")
+    st.caption("Each point is one completed ride. Bubble size represents booking value.")
+    fig = px.scatter(
+        completed_rides,
+        x="Ride Distance",
+        y="Booking Value",
+        hover_data=["Payment Method", "Pickup Location", "Drop Location"],
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 # =========================================================
 # Tab 2: Cancellations & issues
@@ -137,55 +173,60 @@ issue_status = not_completed_rides["Booking Status"].value_counts().reset_index(
 issue_status.columns = ["Booking Status", "Bookings"]
 #endregion
 
-print("CANCELLATIONS & ISSUES")
+with tab_cancellations:
+    st.subheader("Cancellations & issues")
 
-# -------------
-# KPI 
-# -------------
-print("Cancellation rate", str(cancellation_rate) + "%")
-print("Incomplete rate", str(incomplete_rate) + "%")
-print("No driver rate", str(no_driver_rate) + "%")
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Cancellation rate", str(cancellation_rate) + "%")
+    col2.metric("Incomplete rate", str(incomplete_rate) + "%")
+    col3.metric("No driver rate", str(no_driver_rate) + "%")
 
-# -------------
-# Wykres słupkowy booking status
-# -------------
-fig = px.bar(issue_status, x="Bookings", y="Booking Status", orientation="h")
-fig.update_layout(yaxis={"categoryorder": "total ascending"})
-#fig.show()
+    st.divider()
+    
+    issue_type = st.radio(
+        "Issue focus",
+        ["All issues", "Customer cancellations", "Driver cancellations", "Incomplete rides"],
+        horizontal=True,
+    )
 
-# -------------
-# Wykres kołowy powód rezygnacji klienta
-# -------------
-data = rides["Reason for cancelling by Customer"].dropna().value_counts().reset_index()
-data.columns = ["Reason", "Count"]
-fig = px.pie(data, names="Reason", values="Count", hole=0.35)
-#fig.show()
+    col_left, col_right = st.columns(2)
 
-# -------------
-# Wykres kołowy powód rezygnacji kierowcy
-# -------------
-data = rides["Driver Cancellation Reason"].dropna().value_counts().reset_index()
-data.columns = ["Reason", "Count"]
-fig = px.pie(data, names="Reason", values="Count", hole=0.35)
-#fig.show()
+    with col_left:
+        st.markdown("#### Non-successful bookings")
+        fig = px.bar(issue_status, x="Bookings", y="Booking Status", orientation="h")
+        fig.update_layout(yaxis={"categoryorder": "total ascending"})
+        st.plotly_chart(fig, use_container_width=True)
 
-# -------------
-# Wykres kołowy powód niewykonania przejazdu
-# -------------
-data = rides["Incomplete Rides Reason"].dropna().value_counts().reset_index()
-data.columns = ["Reason", "Count"]
-fig = px.pie(data, names="Reason", values="Count", hole=0.35)
-#fig.show()
+    with col_right:
+        if issue_type == "Customer cancellations":
+            st.markdown("#### Customer cancellation reasons")
+            data = rides["Reason for cancelling by Customer"].dropna().value_counts().reset_index()
+            data.columns = ["Reason", "Count"]
+            fig = px.pie(data, names="Reason", values="Count", hole=0.35)
+            st.plotly_chart(fig, use_container_width=True)
 
-# -------------
-# Wykres kołowy status
-# -------------
-data = pd.DataFrame({
-    "Issue type": ["Cancelled", "Incomplete", "No driver found"],
-    "Count": [cancelled_count, incomplete_count, no_driver_count]
-})
-fig = px.pie(data, names="Issue type", values="Count", hole=0.35)
-#fig.show()
+        elif issue_type == "Driver cancellations":
+            st.markdown("#### Driver cancellation reasons")
+            data = rides["Driver Cancellation Reason"].dropna().value_counts().reset_index()
+            data.columns = ["Reason", "Count"]
+            fig = px.pie(data, names="Reason", values="Count", hole=0.35)
+            st.plotly_chart(fig, use_container_width=True)
+
+        elif issue_type == "Incomplete rides":
+            st.markdown("#### Incomplete ride reasons")
+            data = rides["Incomplete Rides Reason"].dropna().value_counts().reset_index()
+            data.columns = ["Reason", "Count"]
+            fig = px.pie(data, names="Reason", values="Count", hole=0.35)
+            st.plotly_chart(fig, use_container_width=True)
+
+        else:
+            st.markdown("#### Issue breakdown")
+            data = pd.DataFrame({
+                "Issue type": ["Cancelled", "Incomplete", "No driver found"],
+                "Count": [cancelled_count, incomplete_count, no_driver_count]
+            })
+            fig = px.pie(data, names="Issue type", values="Count", hole=0.35)
+            st.plotly_chart(fig, use_container_width=True)
 
 
 # =========================================================
@@ -200,54 +241,51 @@ avg_ctat = round(completed_rides["Avg CTAT"].mean(),2)
 rating_pairs = completed_rides.groupby(["Driver Ratings", "Customer Rating"]).size().reset_index(name="Number of rides")
 #endregion
 
-print("RATINGS & TIME")
+with tab_ratings:
+    st.subheader("Ratings & time")
 
-# -------------
-# KPI 
-# -------------
-print("Avg customer rating", avg_customer_rating)
-print("Avg driver rating", avg_driver_rating)
-print("Avg VTAT", str(avg_vtat) + " min")
-print("Avg CTAT", str(avg_ctat) + " min")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Avg customer rating", avg_customer_rating)
+    col2.metric("Avg driver rating", avg_driver_rating)
+    col3.metric("Avg VTAT", str(avg_vtat) + " min")
+    col4.metric("Avg CTAT", str(avg_ctat) + " min")
 
-# -------------
-# Histogram ocen klientów
-# -------------
-fig = px.histogram(completed_rides, x="Customer Rating", nbins=20)
-fig.update_xaxes(range=[2.8, 5.2])
-#fig.show()
 
-# -------------
-# Histogram ocen kierowców
-# -------------
-fig = px.histogram(completed_rides, x="Driver Ratings", nbins=20)
-fig.update_xaxes(range=[2.8, 5.2])
-#fig.show()
+    st.divider()
 
-# -------------
-# WYkres rozrzutu ocen kierowców i klientów
-# -------------
-fig = px.scatter(
-    rating_pairs,
-    x="Driver Ratings",
-    y="Customer Rating",
-    size="Number of rides",
-    hover_data=["Number of rides"],
-)
-fig.update_xaxes(range=[2.8, 5.2])
-fig.update_yaxes(range=[2.8, 5.2])
-#fig.show()
+    col_left, col_right = st.columns(2)
 
-# -------------
-# Wykres pudełkowy ocena a VTAT
-# -------------
-fig = px.box(completed_rides, x="Customer Rating", y="Avg VTAT")
-fig.update_xaxes(range=[2.8, 5.2])
-#fig.show()
+    with col_left:
+        st.markdown("#### Customer rating distribution")
+        fig = px.histogram(completed_rides, x="Customer Rating", nbins=20)
+        fig.update_xaxes(range=[2.8, 5.2])
+        st.plotly_chart(fig, use_container_width=True)
 
-# -------------
-# Wykres pudełkowy ocena a CTAT
-# -------------
-fig = px.box(completed_rides, x="Customer Rating", y="Avg CTAT")
-fig.update_xaxes(range=[2.8, 5.2])
-#fig.show()
+    with col_right:
+        st.markdown("#### Driver rating distribution")
+        fig = px.histogram(completed_rides, x="Driver Ratings", nbins=20)
+        fig.update_xaxes(range=[2.8, 5.2])
+        st.plotly_chart(fig, use_container_width=True)
+
+    metric_focus = st.selectbox("Time metric focus", ["Avg VTAT", "Avg CTAT"])
+
+    col_left, col_right = st.columns(2)
+
+    with col_left:
+        st.markdown("#### Driver rating vs customer rating")
+        fig = px.scatter(
+            rating_pairs,
+            x="Driver Ratings",
+            y="Customer Rating",
+            size="Number of rides",
+            hover_data=["Number of rides"],
+        )
+        fig.update_xaxes(range=[2.8, 5.2])
+        fig.update_yaxes(range=[2.8, 5.2])
+        st.plotly_chart(fig, use_container_width=True)
+
+    with col_right:
+        st.markdown(f"#### {metric_focus} by customer rating")
+        fig = px.box(completed_rides, x="Customer Rating", y=metric_focus)
+        fig.update_xaxes(range=[2.8, 5.2])
+        st.plotly_chart(fig, use_container_width=True)
